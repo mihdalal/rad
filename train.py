@@ -113,7 +113,7 @@ def evaluate(env, agent, video, num_episodes, L, step, args):
             video.save('%d.mp4' % step)
             L.log('eval/' + prefix + 'episode_reward', episode_reward, step)
             all_ep_rewards.append(episode_reward)
-        
+
         L.log('eval/' + prefix + 'eval_time', time.time()-start_time , step)
         mean_ep_reward = np.mean(all_ep_rewards)
         best_ep_reward = np.max(all_ep_rewards)
@@ -128,15 +128,15 @@ def evaluate(env, agent, video, num_episodes, L, step, args):
             log_data = log_data.item()
         except:
             log_data = {}
-            
+
         if key not in log_data:
             log_data[key] = {}
 
         log_data[key][step] = {}
-        log_data[key][step]['step'] = step 
-        log_data[key][step]['mean_ep_reward'] = mean_ep_reward 
-        log_data[key][step]['max_ep_reward'] = best_ep_reward 
-        log_data[key][step]['std_ep_reward'] = std_ep_reward 
+        log_data[key][step]['step'] = step
+        log_data[key][step]['mean_ep_reward'] = mean_ep_reward
+        log_data[key][step]['max_ep_reward'] = best_ep_reward
+        log_data[key][step]['std_ep_reward'] = std_ep_reward
         log_data[key][step]['env_step'] = step * args.action_repeat
 
         np.save(filename,log_data)
@@ -182,7 +182,7 @@ def make_agent(obs_shape, action_shape, args, device):
 
 def main():
     args = parse_args()
-    if args.seed == -1: 
+    if args.seed == -1:
         args.__dict__["seed"] = np.random.randint(1,1000000)
     utils.set_seed_everywhere(args.seed)
 
@@ -199,16 +199,16 @@ def main():
         width=pre_transform_image_size,
         frame_skip=args.action_repeat
     )
- 
+
     env.seed(args.seed)
 
     # stack several consecutive frames together
     if args.encoder_type == 'pixel':
         env = utils.FrameStack(env, k=args.frame_stack)
-    
+
     # make directory
-    ts = time.gmtime() 
-    ts = time.strftime("%m-%d", ts)    
+    ts = time.gmtime()
+    ts = time.strftime("%m-%d", ts)
     env_name = args.domain_name + '-' + args.task_name
     exp_name = env_name + '-' + ts + '-im' + str(args.image_size) +'-b'  \
     + str(args.batch_size) + '-s' + str(args.seed)  + '-' + args.encoder_type
@@ -295,7 +295,7 @@ def main():
 
         # run training update
         if step >= args.init_steps:
-            num_updates = 1 
+            num_updates = 1
             for _ in range(num_updates):
                 agent.update(replay_buffer, L, step)
 
