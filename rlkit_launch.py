@@ -20,7 +20,7 @@ def experiment(variant):
     from rlkit.core import logger
 
     os.system(
-        "python ~/research/rad/kitchen_train.py \
+        "~/miniconda3/envs/hrl-exp-env/bin/python ~/research/rad/kitchen_train.py \
             --encoder_type pixel --work_dir {work_dir} \
             --env_class {env_class} \
             --action_repeat 1 --num_eval_episodes 5 \
