@@ -20,7 +20,7 @@ def experiment(variant):
     from rlkit.core import logger
 
     os.system(
-        "python ~/research/rad/kitchen_train.py \
+        "~/miniconda3/envs/hrl-exp-env/bin/python ~/research/rad/kitchen_train.py \
             --encoder_type pixel --work_dir {work_dir} \
             --env_class {env_class} \
             --action_repeat 1 --num_eval_episodes 5 \
@@ -60,15 +60,15 @@ if __name__ == "__main__":
 
     search_space = {
         "algorithm_kwargs.data_augs": ["translate", "no_aug", "crop"],
-        "algorithm_kwargs.discount": [0.99, 0.8],
+        "algorithm_kwargs.discount": [0.8],
         "algorithm_kwargs.framestack": [1, 2, 3],
-        "algorithm_kwargs.num_train_steps": [250000],
+        "algorithm_kwargs.num_train_steps": [50000],
         "algorithm_kwargs.env_class": [
             "microwave",
             # "kettle",
             # "slide_cabinet",
             # "top_left_burner",
-            "hinge_cabinet",
+            # "hinge_cabinet",
             # "light_switch",
         ],
     }
