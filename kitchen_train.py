@@ -1,4 +1,4 @@
-from d4rl.kitchen.kitchen_envs import KitchenSlideCabinetV0
+from d4rl.kitchen.kitchen_envs import KitchenHingeCabinetV0, KitchenHingeSlideBottomLeftBurnerLightV0, KitchenKettleV0, KitchenLightSwitchV0, KitchenMicrowaveKettleLightTopLeftBurnerV0, KitchenMicrowaveV0, KitchenSlideCabinetV0, KitchenTopLeftBurnerV0
 import numpy as np
 import torch
 import argparse
@@ -35,8 +35,7 @@ class KitchenWrapper(gym.Wrapper):
 def parse_args():
     parser = argparse.ArgumentParser()
     # environment
-    parser.add_argument('--domain_name', default='cartpole')
-    parser.add_argument('--task_name', default='swingup')
+    parser.add_argument('--env_class', default='slide_cabinet', type=str)
     parser.add_argument('--pre_transform_image_size', default=100, type=int)
 
     parser.add_argument('--image_size', default=84, type=int)
@@ -134,8 +133,8 @@ def evaluate(env, agent, video, num_episodes, L, step, args):
         L.log('eval/' + prefix + 'mean_episode_reward', mean_ep_reward, step)
         L.log('eval/' + prefix + 'best_episode_reward', best_ep_reward, step)
 
-        filename = args.work_dir + '/' + args.domain_name + '--'+args.task_name + '-' + args.data_augs + '--s' + str(args.seed) + '--eval_scores.npy'
-        key = args.domain_name + '-' + args.task_name + '-' + args.data_augs
+        filename = args.work_dir + '/' + args.env_class + '-' + args.data_augs + '--s' + str(args.seed) + '--eval_scores.npy'
+        key = args.env_class + '-' + args.data_augs
         try:
             log_data = np.load(filename,allow_pickle=True)
             log_data = log_data.item()
@@ -195,6 +194,7 @@ def make_agent(obs_shape, action_shape, args, device):
 
 def main():
     args = parse_args()
+    torch.backends.cudnn.benchmark = True
     print(args)
     if args.seed == -1:
         args.__dict__["seed"] = np.random.randint(1,1000000)
@@ -203,8 +203,26 @@ def main():
     pre_transform_image_size = args.pre_transform_image_size if 'crop' in args.data_augs else args.image_size
     pre_image_size = args.pre_transform_image_size # record the pre transform image size for translation
 
-
-    env = KitchenSlideCabinetV0(
+    env_class = args.env_class
+    if env_class == "microwave":
+        env_class_ = KitchenMicrowaveV0
+    elif env_class == "kettle":
+        env_class_ = KitchenKettleV0
+    elif env_class == "slide_cabinet":
+        env_class_ = KitchenSlideCabinetV0
+    elif env_class == "hinge_cabinet":
+        env_class_ = KitchenHingeCabinetV0
+    elif env_class == "top_left_burner":
+        env_class_ = KitchenTopLeftBurnerV0
+    elif env_class == "light_switch":
+        env_class_ = KitchenLightSwitchV0
+    elif env_class == "microwave_kettle_light_top_left_burner":
+        env_class_ = KitchenMicrowaveKettleLightTopLeftBurnerV0
+    elif env_class == "hinge_slide_bottom_left_burner_light":
+        env_class_ = KitchenHingeSlideBottomLeftBurnerLightV0
+    else:
+        raise EnvironmentError("invalid env provided")
+    env = env_class_(
         dense=False,
         image_obs=True,
         fixed_schema=False,
@@ -230,7 +248,7 @@ def main():
     # make directory
     ts = time.gmtime()
     ts = time.strftime("%m-%d", ts)
-    env_name = args.domain_name + '-' + args.task_name
+    env_name = args.env_class
     exp_name = env_name + '-' + ts + '-im' + str(args.image_size) +'-b'  \
     + str(args.batch_size) + '-s' + str(args.seed)  + '-' + args.encoder_type
     args.work_dir = args.work_dir + '/'  + exp_name
