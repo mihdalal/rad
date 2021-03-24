@@ -59,18 +59,18 @@ if __name__ == "__main__":
     variant = dict(algorithm_kwargs=algorithm_kwargs)
 
     search_space = {
-        "algorithm_kwargs.data_augs": ["translate", "no_aug", "crop"],
+        "algorithm_kwargs.data_augs": ["no_aug",],
         "algorithm_kwargs.discount": [0.8],
-        "algorithm_kwargs.framestack": [1, 2, 3],
-        "algorithm_kwargs.num_train_steps": [50000],
-        "algorithm_kwargs.discrete_continuous_dist": [1, 0],
+        "algorithm_kwargs.framestack": [1,],
+        "algorithm_kwargs.num_train_steps": [500000],
+        "algorithm_kwargs.discrete_continuous_dist": [1],
         "algorithm_kwargs.env_class": [
-            "microwave",
+            # "microwave",
             # "kettle",
             # "slide_cabinet",
-            # "top_left_burner",
-            # "hinge_cabinet",
-            # "light_switch",
+            "top_left_burner",
+            "hinge_cabinet",
+            "light_switch",
         ],
     }
     sweeper = hyp.DeterministicHyperparameterSweeper(
