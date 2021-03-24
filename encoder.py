@@ -12,10 +12,13 @@ OUT_DIM = {2: 39, 4: 35, 6: 31}
 OUT_DIM_64 = {2: 29, 4: 25, 6: 21}
 OUT_DIM_108 = {4: 47}
 
- 
+
 class PixelEncoder(nn.Module):
     """Convolutional encoder of pixels observations."""
-    def __init__(self, obs_shape, feature_dim, num_layers=2, num_filters=32,output_logits=False):
+
+    def __init__(
+        self, obs_shape, feature_dim, num_layers=2, num_filters=32, output_logits=False
+    ):
         super().__init__()
 
         assert len(obs_shape) == 3
@@ -23,9 +26,7 @@ class PixelEncoder(nn.Module):
         self.feature_dim = feature_dim
         self.num_layers = num_layers
         # try 2 5x5s with strides 2x2. with samep adding, it should reduce 84 to 21, so with valid, it should be even smaller than 21.
-        self.convs = nn.ModuleList(
-            [nn.Conv2d(obs_shape[0], num_filters, 3, stride=2)]
-        )
+        self.convs = nn.ModuleList([nn.Conv2d(obs_shape[0], num_filters, 3, stride=2)])
         for i in range(num_layers - 1):
             self.convs.append(nn.Conv2d(num_filters, num_filters, 3, stride=1))
 
@@ -49,17 +50,17 @@ class PixelEncoder(nn.Module):
         return mu + eps * std
 
     def forward_conv(self, obs):
-        if obs.max() > 1.:
-            obs = obs / 255.
+        if obs.max() > 1.0:
+            obs = obs / 255.0
 
-        self.outputs['obs'] = obs
+        self.outputs["obs"] = obs
 
         conv = torch.relu(self.convs[0](obs))
-        self.outputs['conv1'] = conv
+        self.outputs["conv1"] = conv
 
         for i in range(1, self.num_layers):
             conv = torch.relu(self.convs[i](conv))
-            self.outputs['conv%s' % (i + 1)] = conv
+            self.outputs["conv%s" % (i + 1)] = conv
 
         h = conv.view(conv.size(0), -1)
         return h
@@ -71,16 +72,16 @@ class PixelEncoder(nn.Module):
             h = h.detach()
 
         h_fc = self.fc(h)
-        self.outputs['fc'] = h_fc
+        self.outputs["fc"] = h_fc
 
         h_norm = self.ln(h_fc)
-        self.outputs['ln'] = h_norm
+        self.outputs["ln"] = h_norm
 
         if self.output_logits:
             out = h_norm
         else:
             out = torch.tanh(h_norm)
-            self.outputs['tanh'] = out
+            self.outputs["tanh"] = out
 
         return out
 
@@ -95,18 +96,18 @@ class PixelEncoder(nn.Module):
             return
 
         for k, v in self.outputs.items():
-            L.log_histogram('train_encoder/%s_hist' % k, v, step)
+            L.log_histogram("train_encoder/%s_hist" % k, v, step)
             if len(v.shape) > 2:
-                L.log_image('train_encoder/%s_img' % k, v[0], step)
+                L.log_image("train_encoder/%s_img" % k, v[0], step)
 
         for i in range(self.num_layers):
-            L.log_param('train_encoder/conv%s' % (i + 1), self.convs[i], step)
-        L.log_param('train_encoder/fc', self.fc, step)
-        L.log_param('train_encoder/ln', self.ln, step)
+            L.log_param("train_encoder/conv%s" % (i + 1), self.convs[i], step)
+        L.log_param("train_encoder/fc", self.fc, step)
+        L.log_param("train_encoder/ln", self.ln, step)
 
 
 class IdentityEncoder(nn.Module):
-    def __init__(self, obs_shape, feature_dim, num_layers, num_filters,*args):
+    def __init__(self, obs_shape, feature_dim, num_layers, num_filters, *args):
         super().__init__()
 
         assert len(obs_shape) == 1
@@ -122,7 +123,7 @@ class IdentityEncoder(nn.Module):
         pass
 
 
-_AVAILABLE_ENCODERS = {'pixel': PixelEncoder, 'identity': IdentityEncoder}
+_AVAILABLE_ENCODERS = {"pixel": PixelEncoder, "identity": IdentityEncoder}
 
 
 def make_encoder(

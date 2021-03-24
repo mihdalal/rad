@@ -25,9 +25,9 @@ def experiment(variant):
             --env_class {env_class} \
             --action_repeat 1 --num_eval_episodes 5 \
             --pre_transform_image_size {pre_transform_image_size} --image_size {image_size} \
-            --data_augs {data_augs} --discount {discount} --init_steps 2500 \
+            --data_augs {data_augs} --discount {discount} --init_steps 2500 --discrete_continuous_dist {discrete_continuous_dist}\
             --agent rad_sac --frame_stack {framestack} --save_tb --replay_buffer_capacity {replay_buffer_capacity}\
-            --seed -1 --critic_lr {lr} --actor_lr {lr} --encoder_lr {lr} --eval_freq 1000 --batch_size 512 --num_train_steps {num_train_steps}".format(
+            --seed {seed} --critic_lr {lr} --actor_lr {lr} --encoder_lr {lr} --eval_freq 1000 --batch_size 512 --num_train_steps {num_train_steps}".format(
             **variant["algorithm_kwargs"],
             work_dir=logger.get_snapshot_dir(),
             image_size=image_size,
@@ -63,6 +63,7 @@ if __name__ == "__main__":
         "algorithm_kwargs.discount": [0.8],
         "algorithm_kwargs.framestack": [1, 2, 3],
         "algorithm_kwargs.num_train_steps": [50000],
+        "algorithm_kwargs.discrete_continuous_dist": [1, 0],
         "algorithm_kwargs.env_class": [
             "microwave",
             # "kettle",
@@ -80,6 +81,7 @@ if __name__ == "__main__":
         for _ in range(args.num_seeds):
             seed = random.randint(0, 100000)
             variant["seed"] = seed
+            variant["algorithm_kwargs"]["seed"] = seed
             variant["exp_id"] = exp_id
             run_experiment(
                 experiment,
