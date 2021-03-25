@@ -50,6 +50,7 @@ def parse_args():
     # environment
     parser.add_argument("--env_class", default="slide_cabinet", type=str)
     parser.add_argument("--pre_transform_image_size", default=100, type=int)
+    parser.add_argument("--max_steps", default=5, type=int)
 
     parser.add_argument("--image_size", default=84, type=int)
     parser.add_argument("--action_repeat", default=1, type=int)
@@ -263,7 +264,7 @@ def main():
         use_wrist_cam=False,
         normalize_proprioception_obs=True,
         use_workspace_limits=True,
-        max_steps=5,
+        max_steps=args.max_steps,
         imwidth=pre_transform_image_size,
         imheight=pre_transform_image_size,
     )
