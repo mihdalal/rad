@@ -1,14 +1,15 @@
-import numpy as np
-import torch
-from torch.distributions.one_hot_categorical import OneHotCategorical
-import torch.nn as nn
-import torch.nn.functional as F
 import copy
 import math
 
-import utils
-from encoder import make_encoder
-import data_augs as rad
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.distributions.one_hot_categorical import OneHotCategorical
+
+import rad.data_augs as da
+import rad.utils as utils
+from rad.encoder import make_encoder
 
 LOG_FREQ = 10000
 
@@ -345,6 +346,7 @@ class RadSacAgent(object):
         latent_dim=128,
         data_augs="",
     ):
+        torch.backends.cudnn.benchmark = True
         self.device = device
         self.discount = discount
         self.critic_tau = critic_tau
@@ -362,16 +364,16 @@ class RadSacAgent(object):
         self.augs_funcs = {}
 
         aug_to_func = {
-            "crop": rad.random_crop,
-            "grayscale": rad.random_grayscale,
-            "cutout": rad.random_cutout,
-            "cutout_color": rad.random_cutout_color,
-            "flip": rad.random_flip,
-            "rotate": rad.random_rotation,
-            "rand_conv": rad.random_convolution,
-            "color_jitter": rad.random_color_jitter,
-            "translate": rad.random_translate,
-            "no_aug": rad.no_aug,
+            "crop": da.random_crop,
+            "grayscale": da.random_grayscale,
+            "cutout": da.random_cutout,
+            "cutout_color": da.random_cutout_color,
+            "flip": da.random_flip,
+            "rotate": da.random_rotation,
+            "rand_conv": da.random_convolution,
+            "color_jitter": da.random_color_jitter,
+            "translate": da.random_translate,
+            "no_aug": da.no_aug,
         }
 
         for aug_name in self.data_augs.split("-"):

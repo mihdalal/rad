@@ -1,8 +1,9 @@
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 import torch
 import torch.nn as nn
-from TransformLayer import ColorJitterLayer
+
+from rad.TransformLayer import ColorJitterLayer
 
 
 def random_crop(imgs, out=84):
@@ -277,6 +278,7 @@ def no_aug(x):
 
 if __name__ == "__main__":
     import time
+
     from tabulate import tabulate
 
     def now():

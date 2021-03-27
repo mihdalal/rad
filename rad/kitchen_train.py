@@ -1,3 +1,16 @@
+import argparse
+
+# import dmc2gym
+import copy
+import json
+import os
+import time
+from collections import OrderedDict
+
+import gym
+import numpy as np
+import rlkit.pythonplusplus as ppp
+import torch
 from d4rl.kitchen.kitchen_envs import (
     KitchenHingeCabinetV0,
     KitchenHingeSlideBottomLeftBurnerLightV0,
@@ -8,27 +21,14 @@ from d4rl.kitchen.kitchen_envs import (
     KitchenSlideCabinetV0,
     KitchenTopLeftBurnerV0,
 )
-import numpy as np
-import torch
-import argparse
-import os
-import math
-import gym
-import sys
-import random
-import time
-import json
-
-# import dmc2gym
-import copy
-
-import utils
-from logger import Logger
-from video import VideoRecorder
-
-from curl_sac import RadSacAgent
+from rlkit.core import logger as rlkit_logger
+from rlkit.core.eval_util import create_stats_ordered_dict
 from torchvision import transforms
-import data_augs as rad
+
+import rad.utils as utils
+from rad.curl_sac import RadSacAgent
+from rad.logger import Logger
+from rad.video import VideoRecorder
 
 
 class KitchenWrapper(gym.Wrapper):
@@ -47,70 +47,93 @@ class KitchenWrapper(gym.Wrapper):
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    # environment
-    parser.add_argument("--env_class", default="slide_cabinet", type=str)
-    parser.add_argument("--pre_transform_image_size", default=100, type=int)
-    parser.add_argument("--max_steps", default=5, type=int)
-
-    parser.add_argument("--image_size", default=84, type=int)
-    parser.add_argument("--action_repeat", default=1, type=int)
-    parser.add_argument("--frame_stack", default=3, type=int)
-    # replay buffer
-    parser.add_argument("--replay_buffer_capacity", default=100000, type=int)
     # train
     parser.add_argument("--agent", default="rad_sac", type=str)
-    parser.add_argument("--init_steps", default=1000, type=int)
-    parser.add_argument("--num_train_steps", default=1000000, type=int)
-    parser.add_argument("--batch_size", default=32, type=int)
     parser.add_argument("--hidden_dim", default=1024, type=int)
-    # eval
-    parser.add_argument("--eval_freq", default=1000, type=int)
-    parser.add_argument("--num_eval_episodes", default=10, type=int)
     # critic
-    parser.add_argument("--critic_lr", default=1e-3, type=float)
     parser.add_argument("--critic_beta", default=0.9, type=float)
     parser.add_argument("--critic_tau", default=0.01, type=float)  # try 0.05 or 0.1
     parser.add_argument(
         "--critic_target_update_freq", default=2, type=int
     )  # try to change it to 1 and retain 0.01 above
     # actor
-    parser.add_argument("--actor_lr", default=1e-3, type=float)
     parser.add_argument("--actor_beta", default=0.9, type=float)
     parser.add_argument("--actor_log_std_min", default=-10, type=float)
     parser.add_argument("--actor_log_std_max", default=2, type=float)
     parser.add_argument("--actor_update_freq", default=2, type=int)
     parser.add_argument("--discrete_continuous_dist", default=0, type=int)
     # encoder
-    parser.add_argument("--encoder_type", default="pixel", type=str)
     parser.add_argument("--encoder_feature_dim", default=50, type=int)
-    parser.add_argument("--encoder_lr", default=1e-3, type=float)
     parser.add_argument("--encoder_tau", default=0.05, type=float)
     parser.add_argument("--num_layers", default=4, type=int)
     parser.add_argument("--num_filters", default=32, type=int)
     parser.add_argument("--latent_dim", default=128, type=int)
     # sac
-    parser.add_argument("--discount", default=0.99, type=float)
     parser.add_argument("--init_temperature", default=0.1, type=float)
     parser.add_argument("--alpha_lr", default=1e-4, type=float)
     parser.add_argument("--alpha_beta", default=0.5, type=float)
     # misc
-    parser.add_argument("--seed", default=1, type=int)
-    parser.add_argument("--work_dir", default=".", type=str)
     parser.add_argument("--save_tb", default=False, action="store_true")
     parser.add_argument("--save_buffer", default=False, action="store_true")
     parser.add_argument("--save_video", default=False, action="store_true")
     parser.add_argument("--save_model", default=False, action="store_true")
     parser.add_argument("--detach_encoder", default=False, action="store_true")
-    # data augs
-    parser.add_argument("--data_augs", default="crop", type=str)
 
     parser.add_argument("--log_interval", default=100, type=int)
     args = parser.parse_args()
     return args
 
 
-def evaluate(env, agent, video, num_episodes, L, step, args):
+def compute_path_info(infos):
+    all_env_infos = [ppp.list_of_dicts__to__dict_of_lists(ep_info) for ep_info in infos]
+    statistics = OrderedDict()
+    stat_prefix = ""
+    for k in all_env_infos[0].keys():
+        final_ks = np.array([info[k][-1] for info in all_env_infos])
+        first_ks = np.array([info[k][0] for info in all_env_infos])
+        all_ks = np.concatenate([info[k] for info in all_env_infos])
+        statistics.update(
+            create_stats_ordered_dict(
+                stat_prefix + k,
+                final_ks,
+                stat_prefix="{}/final/".format("env_infos"),
+            )
+        )
+        statistics.update(
+            create_stats_ordered_dict(
+                stat_prefix + k,
+                first_ks,
+                stat_prefix="{}/initial/".format("env_infos"),
+            )
+        )
+        statistics.update(
+            create_stats_ordered_dict(
+                stat_prefix + k,
+                all_ks,
+                stat_prefix="{}/".format("env_infos"),
+            )
+        )
+    return statistics
+
+
+def evaluate(
+    env,
+    agent,
+    video,
+    num_episodes,
+    L,
+    step,
+    encoder_type,
+    data_augs,
+    image_size,
+    pre_transform_image_size,
+    env_class,
+    action_repeat,
+    work_dir,
+    seed,
+):
     all_ep_rewards = []
+    all_infos = []
 
     def run_eval_loop(sample_stochastically=True):
         start_time = time.time()
@@ -120,27 +143,30 @@ def evaluate(env, agent, video, num_episodes, L, step, args):
             video.init(enabled=(i == 0))
             done = False
             episode_reward = 0
+            ep_infos = []
             while not done:
                 # center crop image
-                if args.encoder_type == "pixel" and "crop" in args.data_augs:
-                    obs = utils.center_crop_image(obs, args.image_size)
-                if args.encoder_type == "pixel" and "translate" in args.data_augs:
-                    # first crop the center with pre_image_size
-                    obs = utils.center_crop_image(obs, args.pre_transform_image_size)
+                if encoder_type == "pixel" and "crop" in data_augs:
+                    obs = utils.center_crop_image(obs, image_size)
+                if encoder_type == "pixel" and "translate" in data_augs:
+                    # first crop the center with pre_transform_image_size
+                    obs = utils.center_crop_image(obs, pre_transform_image_size)
                     # then translate cropped to center
-                    obs = utils.center_translate(obs, args.image_size)
+                    obs = utils.center_translate(obs, image_size)
                 with utils.eval_mode(agent):
                     if sample_stochastically:
                         action = agent.sample_action(obs / 255.0)
                     else:
                         action = agent.select_action(obs / 255.0)
-                obs, reward, done, _ = env.step(action)
+                obs, reward, done, info = env.step(action)
                 video.record(env)
                 episode_reward += reward
+                ep_infos.append(info)
 
             video.save("%d.mp4" % step)
             L.log("eval/" + prefix + "episode_reward", episode_reward, step)
             all_ep_rewards.append(episode_reward)
+            all_infos.append(ep_infos)
 
         L.log("eval/" + prefix + "eval_time", time.time() - start_time, step)
         mean_ep_reward = np.mean(all_ep_rewards)
@@ -148,18 +174,23 @@ def evaluate(env, agent, video, num_episodes, L, step, args):
         std_ep_reward = np.std(all_ep_rewards)
         L.log("eval/" + prefix + "mean_episode_reward", mean_ep_reward, step)
         L.log("eval/" + prefix + "best_episode_reward", best_ep_reward, step)
+        rlkit_logger.record_dict(
+            dict(AverageReturn=mean_ep_reward), prefix="evaluation/"
+        )
+        statistics = compute_path_info(all_infos)
+        rlkit_logger.record_dict(statistics, prefix="evaluation/")
 
         filename = (
-            args.work_dir
+            work_dir
             + "/"
-            + args.env_class
+            + env_class
             + "-"
-            + args.data_augs
+            + data_augs
             + "--s"
-            + str(args.seed)
+            + str(seed)
             + "--eval_scores.npy"
         )
-        key = args.env_class + "-" + args.data_augs
+        key = env_class + "-" + data_augs
         try:
             log_data = np.load(filename, allow_pickle=True)
             log_data = log_data.item()
@@ -174,7 +205,7 @@ def evaluate(env, agent, video, num_episodes, L, step, args):
         log_data[key][step]["mean_ep_reward"] = mean_ep_reward
         log_data[key][step]["max_ep_reward"] = best_ep_reward
         log_data[key][step]["std_ep_reward"] = std_ep_reward
-        log_data[key][step]["env_step"] = step * args.action_repeat
+        log_data[key][step]["env_step"] = step * action_repeat
 
         np.save(filename, log_data)
 
@@ -182,59 +213,80 @@ def evaluate(env, agent, video, num_episodes, L, step, args):
     L.dump(step)
 
 
-def make_agent(obs_shape, discrete_continuous_dist, continuous_action_dim, discrete_action_dim, args, device):
+def make_agent(
+    obs_shape,
+    continuous_action_dim,
+    discrete_action_dim,
+    args,
+    agent_kwargs,
+    device,
+):
     if args.agent == "rad_sac":
         return RadSacAgent(
             obs_shape=obs_shape,
-            discrete_continuous_dist=discrete_continuous_dist,
             continuous_action_dim=continuous_action_dim,
             discrete_action_dim=discrete_action_dim,
             device=device,
             hidden_dim=args.hidden_dim,
-            discount=args.discount,
             init_temperature=args.init_temperature,
             alpha_lr=args.alpha_lr,
             alpha_beta=args.alpha_beta,
-            actor_lr=args.actor_lr,
             actor_beta=args.actor_beta,
             actor_log_std_min=args.actor_log_std_min,
             actor_log_std_max=args.actor_log_std_max,
             actor_update_freq=args.actor_update_freq,
-            critic_lr=args.critic_lr,
             critic_beta=args.critic_beta,
             critic_tau=args.critic_tau,
             critic_target_update_freq=args.critic_target_update_freq,
-            encoder_type=args.encoder_type,
             encoder_feature_dim=args.encoder_feature_dim,
-            encoder_lr=args.encoder_lr,
             encoder_tau=args.encoder_tau,
             num_layers=args.num_layers,
             num_filters=args.num_filters,
             log_interval=args.log_interval,
             detach_encoder=args.detach_encoder,
             latent_dim=args.latent_dim,
-            data_augs=args.data_augs,
+            **agent_kwargs,
         )
     else:
         assert "agent is not supported: %s" % args.agent
 
 
-def main():
+def experiment(variant):
+    work_dir = rlkit_logger.get_snapshot_dir()
     args = parse_args()
-    torch.backends.cudnn.benchmark = True
-    print(args)
-    if args.seed == -1:
-        args.__dict__["seed"] = np.random.randint(1, 1000000)
-    utils.set_seed_everywhere(args.seed)
-    os.makedirs(args.work_dir, exist_ok=True)
-    pre_transform_image_size = (
-        args.pre_transform_image_size if "crop" in args.data_augs else args.image_size
-    )
-    pre_image_size = (
-        args.pre_transform_image_size
-    )  # record the pre transform image size for translation
+    seed = int(variant["seed"])
+    utils.set_seed_everywhere(seed)
+    os.makedirs(work_dir, exist_ok=True)
+    agent_kwargs = variant["agent_kwargs"]
+    data_augs = agent_kwargs["data_augs"]
+    encoder_type = agent_kwargs["encoder_type"]
+    discrete_continuous_dist = agent_kwargs["discrete_continuous_dist"]
 
-    env_class = args.env_class
+    env_class = variant["env_class"]
+    env_kwargs = variant["env_kwargs"]
+    pre_transform_image_size = variant["pre_transform_image_size"]
+    image_size = variant["image_size"]
+    frame_stack = variant["frame_stack"]
+    batch_size = variant["batch_size"]
+    replay_buffer_capacity = variant["replay_buffer_capacity"]
+    num_train_steps = variant["num_train_steps"]
+    num_eval_episodes = variant["num_eval_episodes"]
+    eval_freq = variant["eval_freq"]
+    action_repeat = variant["action_repeat"]
+    init_steps = variant["init_steps"]
+    log_interval = variant["log_interval"]
+    pre_transform_image_size = (
+        pre_transform_image_size if "crop" in data_augs else image_size
+    )
+    pre_transform_image_size = pre_transform_image_size
+
+    if data_augs == "crop":
+        pre_transform_image_size = 100
+        image_size = image_size
+    elif data_augs == "translate":
+        pre_transform_image_size = 100
+        image_size = 108
+
     if env_class == "microwave":
         env_class_ = KitchenMicrowaveV0
     elif env_class == "kettle":
@@ -254,54 +306,44 @@ def main():
     else:
         raise EnvironmentError("invalid env provided")
     env_pre = env_class_(
-        dense=False,
-        image_obs=True,
-        fixed_schema=False,
-        action_scale=1.4,
-        use_combined_action_space=True,
-        proprioception=False,
-        wrist_cam_concat_with_fixed_view=False,
-        use_wrist_cam=False,
-        normalize_proprioception_obs=True,
-        use_workspace_limits=True,
-        max_steps=args.max_steps,
+        **env_kwargs,
         imwidth=pre_transform_image_size,
         imheight=pre_transform_image_size,
     )
     env = KitchenWrapper(env_pre)
-    env.seed(args.seed)
+    env.seed(seed)
 
     # stack several consecutive frames together
-    if args.encoder_type == "pixel":
-        env = utils.FrameStack(env, k=args.frame_stack)
+    if encoder_type == "pixel":
+        env = utils.FrameStack(env, k=frame_stack)
 
     # make directory
     ts = time.gmtime()
     ts = time.strftime("%m-%d", ts)
-    env_name = args.env_class
+    env_name = env_class
     exp_name = (
         env_name
         + "-"
         + ts
         + "-im"
-        + str(args.image_size)
+        + str(image_size)
         + "-b"
-        + str(args.batch_size)
+        + str(batch_size)
         + "-s"
-        + str(args.seed)
+        + str(seed)
         + "-"
-        + args.encoder_type
+        + encoder_type
     )
-    args.work_dir = args.work_dir + "/" + exp_name
+    work_dir = work_dir + "/" + exp_name
 
-    utils.make_dir(args.work_dir)
-    video_dir = utils.make_dir(os.path.join(args.work_dir, "video"))
-    model_dir = utils.make_dir(os.path.join(args.work_dir, "model"))
-    buffer_dir = utils.make_dir(os.path.join(args.work_dir, "buffer"))
+    utils.make_dir(work_dir)
+    video_dir = utils.make_dir(os.path.join(work_dir, "video"))
+    model_dir = utils.make_dir(os.path.join(work_dir, "model"))
+    buffer_dir = utils.make_dir(os.path.join(work_dir, "buffer"))
 
     video = VideoRecorder(video_dir if args.save_video else None)
 
-    with open(os.path.join(args.work_dir, "args.json"), "w") as f:
+    with open(os.path.join(work_dir, "args.json"), "w") as f:
         json.dump(vars(args), f, sort_keys=True, indent=4)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -309,17 +351,17 @@ def main():
     num_primitives = env_pre.num_primitives
     max_arg_len = env_pre.max_arg_len
 
-    if args.discrete_continuous_dist:
+    if discrete_continuous_dist:
         continuous_action_dim = max_arg_len
         discrete_action_dim = num_primitives
     else:
         continuous_action_dim = max_arg_len + num_primitives
         discrete_action_dim = 0
 
-    if args.encoder_type == "pixel":
-        obs_shape = (3 * args.frame_stack, args.image_size, args.image_size)
+    if encoder_type == "pixel":
+        obs_shape = (3 * frame_stack, image_size, image_size)
         pre_aug_obs_shape = (
-            3 * args.frame_stack,
+            3 * frame_stack,
             pre_transform_image_size,
             pre_transform_image_size,
         )
@@ -330,33 +372,51 @@ def main():
     replay_buffer = utils.ReplayBuffer(
         obs_shape=pre_aug_obs_shape,
         action_size=continuous_action_dim + discrete_action_dim,
-        capacity=args.replay_buffer_capacity,
-        batch_size=args.batch_size,
+        capacity=replay_buffer_capacity,
+        batch_size=batch_size,
         device=device,
-        image_size=args.image_size,
-        pre_image_size=pre_image_size,
+        image_size=image_size,
+        pre_image_size=pre_transform_image_size,
     )
 
     agent = make_agent(
         obs_shape=obs_shape,
-        discrete_continuous_dist=args.discrete_continuous_dist,
         continuous_action_dim=continuous_action_dim,
         discrete_action_dim=discrete_action_dim,
         args=args,
         device=device,
+        agent_kwargs=agent_kwargs,
     )
 
-    L = Logger(args.work_dir, use_tb=args.save_tb)
+    L = Logger(work_dir, use_tb=args.save_tb)
 
     episode, episode_reward, done = 0, 0, True
     start_time = time.time()
-
-    for step in range(args.num_train_steps):
+    epoch_start_time = time.time()
+    all_infos = []
+    ep_infos = []
+    num_train_calls = 0
+    for step in range(num_train_steps):
         # evaluate agent periodically
 
-        if step % args.eval_freq == 0:
+        if step % eval_freq == 0:
             L.log("eval/episode", episode, step)
-            evaluate(env, agent, video, args.num_eval_episodes, L, step, args)
+            evaluate(
+                env,
+                agent,
+                video,
+                num_eval_episodes,
+                L,
+                step,
+                encoder_type,
+                data_augs,
+                image_size,
+                pre_transform_image_size,
+                env_class,
+                action_repeat,
+                work_dir,
+                seed,
+            )
             if args.save_model:
                 agent.save_curl(model_dir, step)
             if args.save_buffer:
@@ -364,36 +424,49 @@ def main():
 
         if done:
             if step > 0:
-                if step % args.log_interval == 0:
-                    L.log("train/duration", time.time() - start_time, step)
+                if step % log_interval == 0:
+                    L.log("train/duration", time.time() - epoch_start_time, step)
                     L.dump(step)
-                start_time = time.time()
-            if step % args.log_interval == 0:
+            if step % log_interval == 0:
                 L.log("train/episode_reward", episode_reward, step)
-
+            all_infos.append(ep_infos)
+            ep_infos = []
             obs = env.reset()
             done = False
             episode_reward = 0
             episode_step = 0
             episode += 1
-            if step % args.log_interval == 0:
+            if step % log_interval == 0:
                 L.log("train/episode", episode, step)
+                # statistics = compute_path_info(all_infos)
+
+                # rlkit_logger.record_dict(statistics, prefix="exploration/")
+                rlkit_logger.record_tabular(
+                    "time/epoch (s)", time.time() - epoch_start_time
+                )
+                rlkit_logger.record_tabular("time/total (s)", time.time() - start_time)
+                rlkit_logger.record_tabular("trainer/num_train_calls", num_train_calls)
+                rlkit_logger.record_tabular("Epoch", step // log_interval)
+                rlkit_logger.dump_tabular(with_prefix=False, with_timestamp=False)
+                all_infos = []
+                epoch_start_time = time.time()
 
         # sample action for data collection
-        if step < args.init_steps:
+        if step < init_steps:
             action = env.action_space.sample()
         else:
             with utils.eval_mode(agent):
                 action = agent.sample_action(obs / 255.0)
 
         # run training update
-        if step >= args.init_steps:
+        if step >= init_steps:
             num_updates = 1
             for _ in range(num_updates):
                 agent.update(replay_buffer, L, step)
+                num_train_calls += 1
 
-        next_obs, reward, done, _ = env.step(action)
-
+        next_obs, reward, done, info = env.step(action)
+        ep_infos.append(info)
         # allow infinit bootstrap
         done_bool = 0 if episode_step + 1 == env._max_episode_steps else float(done)
         episode_reward += reward
@@ -401,9 +474,3 @@ def main():
 
         obs = next_obs
         episode_step += 1
-
-
-if __name__ == "__main__":
-    torch.multiprocessing.set_start_method("spawn")
-
-    main()
