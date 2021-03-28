@@ -23,6 +23,7 @@ from d4rl.kitchen.kitchen_envs import (
 )
 from rlkit.core import logger as rlkit_logger
 from rlkit.core.eval_util import create_stats_ordered_dict
+from rlkit.envs.dmc_wrappers import ActionRepeat, NormalizeActions, TimeLimit
 from torchvision import transforms
 
 import rad.utils as utils
@@ -275,6 +276,7 @@ def experiment(variant):
     action_repeat = variant["action_repeat"]
     init_steps = variant["init_steps"]
     log_interval = variant["log_interval"]
+    use_raw_actions = variant["use_raw_actions"]
     pre_transform_image_size = (
         pre_transform_image_size if "crop" in data_augs else image_size
     )
@@ -311,6 +313,10 @@ def experiment(variant):
         imheight=pre_transform_image_size,
     )
     env = KitchenWrapper(env_pre)
+    if use_raw_actions:
+        env = ActionRepeat(env, 2)
+        env = NormalizeActions(env)
+        env = TimeLimit(env, 500)
     env.seed(seed)
 
     # stack several consecutive frames together
@@ -351,12 +357,16 @@ def experiment(variant):
     num_primitives = env_pre.num_primitives
     max_arg_len = env_pre.max_arg_len
 
-    if discrete_continuous_dist:
-        continuous_action_dim = max_arg_len
-        discrete_action_dim = num_primitives
-    else:
-        continuous_action_dim = max_arg_len + num_primitives
+    if use_raw_actions:
+        continuous_action_dim = env.action_space.low.size
         discrete_action_dim = 0
+    else:
+        if discrete_continuous_dist:
+            continuous_action_dim = max_arg_len
+            discrete_action_dim = num_primitives
+        else:
+            continuous_action_dim = max_arg_len + num_primitives
+            discrete_action_dim = 0
 
     if encoder_type == "pixel":
         obs_shape = (3 * frame_stack, image_size, image_size)
