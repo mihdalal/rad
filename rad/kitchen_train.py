@@ -244,6 +244,7 @@ def make_agent(
 
 
 def experiment(variant):
+    gym.logger.set_level(40)
     work_dir = rlkit_logger.get_snapshot_dir()
     args = parse_args()
     seed = int(variant["seed"])
