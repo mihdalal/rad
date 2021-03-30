@@ -176,7 +176,7 @@ def evaluate(
         L.log("eval/" + prefix + "mean_episode_reward", mean_ep_reward, step)
         L.log("eval/" + prefix + "best_episode_reward", best_ep_reward, step)
         rlkit_logger.record_dict(
-            dict(AverageReturn=mean_ep_reward), prefix="evaluation/"
+            {"Average Returns": mean_ep_reward}, prefix="evaluation/"
         )
         statistics = compute_path_info(all_infos)
         rlkit_logger.record_dict(statistics, prefix="evaluation/")
@@ -455,7 +455,8 @@ def experiment(variant):
                     "time/epoch (s)", time.time() - epoch_start_time
                 )
                 rlkit_logger.record_tabular("time/total (s)", time.time() - start_time)
-                rlkit_logger.record_tabular("trainer/num_train_calls", num_train_calls)
+                rlkit_logger.record_tabular("trainer/num train calls", num_train_calls)
+                rlkit_logger.record_tabular("exploration/num steps total", step)
                 rlkit_logger.record_tabular("Epoch", step // log_interval)
                 rlkit_logger.dump_tabular(with_prefix=False, with_timestamp=False)
                 all_infos = []
