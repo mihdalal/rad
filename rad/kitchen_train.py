@@ -23,27 +23,18 @@ from d4rl.kitchen.kitchen_envs import (
 )
 from rlkit.core import logger as rlkit_logger
 from rlkit.core.eval_util import create_stats_ordered_dict
-from rlkit.envs.dmc_wrappers import ActionRepeat, NormalizeActions, TimeLimit
+from rlkit.envs.dmc_wrappers import (
+    ActionRepeat,
+    KitchenWrapper,
+    NormalizeActions,
+    TimeLimit,
+)
 from torchvision import transforms
 
 import rad.utils as utils
 from rad.curl_sac import RadSacAgent
 from rad.logger import Logger
 from rad.video import VideoRecorder
-
-
-class KitchenWrapper(gym.Wrapper):
-    def __init__(self, env):
-        gym.Wrapper.__init__(self, env)
-        self._max_episode_steps = env.max_steps
-
-    def reset(self):
-        obs = self.env.reset()
-        return obs.reshape(-1, self.env.imwidth, self.env.imheight)
-
-    def step(self, action):
-        obs, reward, done, info = self.env.step(action)
-        return obs.reshape(-1, self.env.imwidth, self.env.imheight), reward, done, info
 
 
 def parse_args():
