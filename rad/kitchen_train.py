@@ -1,5 +1,4 @@
 import argparse
-
 # import dmc2gym
 import copy
 import json
@@ -12,23 +11,14 @@ import numpy as np
 import rlkit.pythonplusplus as ppp
 import torch
 from d4rl.kitchen.kitchen_envs import (
-    KitchenHingeCabinetV0,
-    KitchenHingeSlideBottomLeftBurnerLightV0,
-    KitchenKettleV0,
-    KitchenLightSwitchV0,
-    KitchenMicrowaveKettleLightTopLeftBurnerV0,
-    KitchenMicrowaveV0,
-    KitchenSlideCabinetV0,
-    KitchenTopLeftBurnerV0,
-)
+    KitchenHingeCabinetV0, KitchenHingeSlideBottomLeftBurnerLightV0,
+    KitchenKettleV0, KitchenLightSwitchV0,
+    KitchenMicrowaveKettleLightTopLeftBurnerV0, KitchenMicrowaveV0,
+    KitchenSlideCabinetV0, KitchenTopLeftBurnerV0)
 from rlkit.core import logger as rlkit_logger
 from rlkit.core.eval_util import create_stats_ordered_dict
-from rlkit.envs.dmc_wrappers import (
-    ActionRepeat,
-    KitchenWrapper,
-    NormalizeActions,
-    TimeLimit,
-)
+from rlkit.envs.dmc_wrappers import (ActionRepeat, KitchenWrapper,
+                                     NormalizeActions, TimeLimit)
 from torchvision import transforms
 
 import rad.utils as utils
@@ -304,16 +294,28 @@ def experiment(variant):
         imwidth=pre_transform_image_size,
         imheight=pre_transform_image_size,
     )
-    env = KitchenWrapper(env_pre)
+    expl_env = KitchenWrapper(env_pre)
     if use_raw_actions:
-        env = ActionRepeat(env, 2)
-        env = NormalizeActions(env)
-        env = TimeLimit(env, 500)
-    env.seed(seed)
+        expl_env = ActionRepeat(expl_env, 2)
+        expl_env = NormalizeActions(expl_env)
+        expl_env = TimeLimit(expl_env, 500)
+    expl_env.seed(seed)
+
+    eval_env_pre = env_class_(
+        **env_kwargs,
+        imwidth=pre_transform_image_size,
+        imheight=pre_transform_image_size,
+    )
+    eval_env = KitchenWrapper(eval_env_pre)
+    if use_raw_actions:
+        eval_env = ActionRepeat(eval_env, 2)
+        eval_env = NormalizeActions(eval_env)
+        eval_env = TimeLimit(eval_env, 500)
+    eval_env.seed(seed)
 
     # stack several consecutive frames together
     if encoder_type == "pixel":
-        env = utils.FrameStack(env, k=frame_stack)
+        env = utils.FrameStack(expl_env, k=frame_stack)
 
     # make directory
     ts = time.gmtime()
@@ -404,7 +406,7 @@ def experiment(variant):
         if step % eval_freq == 0:
             L.log("eval/episode", episode, step)
             evaluate(
-                env,
+                eval_env,
                 agent,
                 video,
                 num_eval_episodes,
@@ -433,7 +435,7 @@ def experiment(variant):
                 L.log("train/episode_reward", episode_reward, step)
             all_infos.append(ep_infos)
             ep_infos = []
-            obs = env.reset()
+            obs = expl_env.reset()
             done = False
             episode_reward = 0
             episode_step = 0
@@ -456,7 +458,7 @@ def experiment(variant):
 
         # sample action for data collection
         if step < init_steps:
-            action = env.action_space.sample()
+            action = expl_env.action_space.sample()
         else:
             with utils.eval_mode(agent):
                 action = agent.sample_action(obs / 255.0)
@@ -468,10 +470,12 @@ def experiment(variant):
                 agent.update(replay_buffer, L, step)
                 num_train_calls += 1
 
-        next_obs, reward, done, info = env.step(action)
+        next_obs, reward, done, info = expl_env.step(action)
         ep_infos.append(info)
         # allow infinit bootstrap
-        done_bool = 0 if episode_step + 1 == env._max_episode_steps else float(done)
+        done_bool = (
+            0 if episode_step + 1 == expl_env._max_episode_steps else float(done)
+        )
         episode_reward += reward
         replay_buffer.add(obs, action, reward, next_obs, done_bool)
 
