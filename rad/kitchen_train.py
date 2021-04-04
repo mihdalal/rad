@@ -1,4 +1,5 @@
 import argparse
+
 # import dmc2gym
 import copy
 import json
@@ -11,14 +12,25 @@ import numpy as np
 import rlkit.pythonplusplus as ppp
 import torch
 from d4rl.kitchen.kitchen_envs import (
-    KitchenHingeCabinetV0, KitchenHingeSlideBottomLeftBurnerLightV0,
-    KitchenKettleV0, KitchenLightSwitchV0,
-    KitchenMicrowaveKettleLightTopLeftBurnerV0, KitchenMicrowaveV0,
-    KitchenSlideCabinetV0, KitchenTopLeftBurnerV0)
+    KitchenHingeCabinetV0,
+    KitchenHingeSlideBottomLeftBurnerLightV0,
+    KitchenKettleV0,
+    KitchenLightSwitchV0,
+    KitchenMicrowaveKettleLightTopLeftBurnerV0,
+    KitchenMicrowaveV0,
+    KitchenSlideCabinetV0,
+    KitchenTopLeftBurnerV0,
+)
 from rlkit.core import logger as rlkit_logger
 from rlkit.core.eval_util import create_stats_ordered_dict
-from rlkit.envs.dmc_wrappers import (ActionRepeat, KitchenWrapper,
-                                     NormalizeActions, TimeLimit)
+from rlkit.envs.mujoco_vec_wrappers import make_kitchen_env, make_metaworld_env
+from rlkit.envs.primitives_wrappers import (
+    ActionRepeat,
+    ImageEnvMetaworld,
+    ImageUnFlattenWrapper,
+    NormalizeActions,
+    TimeLimit,
+)
 from torchvision import transforms
 
 import rad.utils as utils
@@ -245,6 +257,7 @@ def experiment(variant):
     encoder_type = agent_kwargs["encoder_type"]
     discrete_continuous_dist = agent_kwargs["discrete_continuous_dist"]
 
+    env_suite = variant["env_suite"]
     env_class = variant["env_class"]
     env_kwargs = variant["env_kwargs"]
     pre_transform_image_size = variant["pre_transform_image_size"]
@@ -271,48 +284,36 @@ def experiment(variant):
         pre_transform_image_size = 100
         image_size = 108
 
-    if env_class == "microwave":
-        env_class_ = KitchenMicrowaveV0
-    elif env_class == "kettle":
-        env_class_ = KitchenKettleV0
-    elif env_class == "slide_cabinet":
-        env_class_ = KitchenSlideCabinetV0
-    elif env_class == "hinge_cabinet":
-        env_class_ = KitchenHingeCabinetV0
-    elif env_class == "top_left_burner":
-        env_class_ = KitchenTopLeftBurnerV0
-    elif env_class == "light_switch":
-        env_class_ = KitchenLightSwitchV0
-    elif env_class == "microwave_kettle_light_top_left_burner":
-        env_class_ = KitchenMicrowaveKettleLightTopLeftBurnerV0
-    elif env_class == "hinge_slide_bottom_left_burner_light":
-        env_class_ = KitchenHingeSlideBottomLeftBurnerLightV0
+    if env_suite == "kitchen":
+        env_kwargs["imwidth"] = pre_transform_image_size
+        env_kwargs["imheight"] = pre_transform_image_size
+
+        env_pre = make_kitchen_env(env_class, env_kwargs)
+        expl_env = ImageUnFlattenWrapper(env_pre)
+        expl_env.seed(seed)
+        if use_raw_actions:
+            expl_env = ActionRepeat(expl_env, 2)
+            expl_env = NormalizeActions(expl_env)
+            expl_env = TimeLimit(expl_env, 500)
+
+        eval_env_pre = make_kitchen_env(env_class, env_kwargs)
+        eval_env = ImageUnFlattenWrapper(eval_env_pre)
+        eval_env.seed(seed)
+        if use_raw_actions:
+            eval_env = ActionRepeat(eval_env, 2)
+            eval_env = NormalizeActions(eval_env)
+            eval_env = TimeLimit(eval_env, 500)
     else:
-        raise EnvironmentError("invalid env provided")
-    env_pre = env_class_(
-        **env_kwargs,
-        imwidth=pre_transform_image_size,
-        imheight=pre_transform_image_size,
-    )
-    expl_env = KitchenWrapper(env_pre)
-    if use_raw_actions:
-        expl_env = ActionRepeat(expl_env, 2)
-        expl_env = NormalizeActions(expl_env)
-        expl_env = TimeLimit(expl_env, 500)
-    expl_env.seed(seed)
-
-    eval_env_pre = env_class_(
-        **env_kwargs,
-        imwidth=pre_transform_image_size,
-        imheight=pre_transform_image_size,
-    )
-    eval_env = KitchenWrapper(eval_env_pre)
-    if use_raw_actions:
-        eval_env = ActionRepeat(eval_env, 2)
-        eval_env = NormalizeActions(eval_env)
-        eval_env = TimeLimit(eval_env, 500)
-    eval_env.seed(seed)
-
+        expl_env = TimeLimit(
+            ImageUnFlattenWrapper(
+                ImageEnvMetaworld(
+                    make_metaworld_env(env_class, env_kwargs),
+                    imwidth=pre_transform_image_size,
+                    imheight=pre_transform_image_size,
+                )
+            ),
+            150,
+        )
     # stack several consecutive frames together
     if encoder_type == "pixel":
         env = utils.FrameStack(expl_env, k=frame_stack)
