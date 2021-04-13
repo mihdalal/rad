@@ -398,6 +398,7 @@ def experiment(variant):
     episode, episode_reward, done = 0, 0, True
     start_time = time.time()
     epoch_start_time = time.time()
+    total_train_expl_time = 0
     all_infos = []
     ep_infos = []
     num_train_calls = 0
@@ -426,7 +427,7 @@ def experiment(variant):
                 agent.save_curl(model_dir, step)
             if args.save_buffer:
                 replay_buffer.save(buffer_dir)
-
+        train_expl_st = time.time()
         if done:
             if step > 0:
                 if step % log_interval == 0:
@@ -450,6 +451,7 @@ def experiment(variant):
                     "time/epoch (s)", time.time() - epoch_start_time
                 )
                 rlkit_logger.record_tabular("time/total (s)", time.time() - start_time)
+                rlkit_logger.record_tabular("time/training and exploration (s)", total_train_expl_time)
                 rlkit_logger.record_tabular("trainer/num train calls", num_train_calls)
                 rlkit_logger.record_tabular("exploration/num steps total", step)
                 rlkit_logger.record_tabular("Epoch", step // log_interval)
@@ -482,3 +484,4 @@ def experiment(variant):
 
         obs = next_obs
         episode_step += 1
+        total_train_expl_time += time.time()-train_expl_st
