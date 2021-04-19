@@ -304,15 +304,37 @@ def experiment(variant):
             eval_env = NormalizeActions(eval_env)
             eval_env = TimeLimit(eval_env, 500)
     else:
-        expl_env = TimeLimit(
-            ImageUnFlattenWrapper(
+        use_image_obs = env_kwargs['use_image_obs']
+        reward_scale = env_kwargs['reward_scale']
+        use_dm_backend = env_kwargs['use_dm_backend']
+        env_pre = make_metaworld_env(env_class, env_kwargs, use_dm_backend)
+        eval_env_pre = make_metaworld_env(env_class, env_kwargs, use_dm_backend)
+        if use_image_obs:
+            env_pre = ImageUnFlattenWrapper(
                 ImageEnvMetaworld(
-                    make_metaworld_env(env_class, env_kwargs),
+                    env_pre,
                     imwidth=pre_transform_image_size,
                     imheight=pre_transform_image_size,
+                    reward_scale=reward_scale,
                 )
-            ),
-            150,
+            )
+
+            eval_env_pre = ImageUnFlattenWrapper(
+                ImageEnvMetaworld(
+                    eval_env_pre,
+                    imwidth=pre_transform_image_size,
+                    imheight=pre_transform_image_size,
+                    reward_scale=reward_scale,
+                )
+            )
+        expl_env = TimeLimit(
+            env_pre,
+            env_kwargs["max_path_length"],
+        )
+
+        eval_env = TimeLimit(
+            eval_env_pre,
+            env_kwargs["max_path_length"],
         )
     # stack several consecutive frames together
     if encoder_type == "pixel":
