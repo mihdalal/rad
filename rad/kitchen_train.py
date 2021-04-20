@@ -23,7 +23,7 @@ from d4rl.kitchen.kitchen_envs import (
 )
 from rlkit.core import logger as rlkit_logger
 from rlkit.core.eval_util import create_stats_ordered_dict
-from rlkit.envs.mujoco_vec_wrappers import make_kitchen_env, make_metaworld_env
+from rlkit.envs.primitives_make_env import make_base_kitchen_env, make_base_metaworld_env
 from rlkit.envs.primitives_wrappers import (
     ActionRepeat,
     ImageEnvMetaworld,
