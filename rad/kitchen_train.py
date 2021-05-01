@@ -428,6 +428,7 @@ def experiment(variant):
         # evaluate agent periodically
 
         if step % eval_freq == 0:
+            total_train_expl_time += time.time()-train_expl_st
             L.log("eval/episode", episode, step)
             evaluate(
                 eval_env,
@@ -449,7 +450,7 @@ def experiment(variant):
                 agent.save_curl(model_dir, step)
             if args.save_buffer:
                 replay_buffer.save(buffer_dir)
-        train_expl_st = time.time()
+            train_expl_st = time.time()
         if done:
             if step > 0:
                 if step % log_interval == 0:
@@ -506,4 +507,3 @@ def experiment(variant):
 
         obs = next_obs
         episode_step += 1
-        total_train_expl_time += time.time()-train_expl_st
