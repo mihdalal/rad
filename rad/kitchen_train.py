@@ -32,7 +32,7 @@ from rlkit.envs.primitives_wrappers import (
     TimeLimit,
 )
 from torchvision import transforms
-
+import rlkit.envs.primitives_make_env as primitives_make_env
 import rad.utils as utils
 from rad.curl_sac import RadSacAgent
 from rad.logger import Logger
@@ -121,7 +121,7 @@ def evaluate(
     data_augs,
     image_size,
     pre_transform_image_size,
-    env_class,
+    env_name,
     action_repeat,
     work_dir,
     seed,
@@ -177,14 +177,14 @@ def evaluate(
         filename = (
             work_dir
             + "/"
-            + env_class
+            + env_name
             + "-"
             + data_augs
             + "--s"
             + str(seed)
             + "--eval_scores.npy"
         )
-        key = env_class + "-" + data_augs
+        key = env_name + "-" + data_augs
         try:
             log_data = np.load(filename, allow_pickle=True)
             log_data = log_data.item()
@@ -258,7 +258,7 @@ def experiment(variant):
     discrete_continuous_dist = agent_kwargs["discrete_continuous_dist"]
 
     env_suite = variant["env_suite"]
-    env_class = variant["env_class"]
+    env_name = variant["env_name"]
     env_kwargs = variant["env_kwargs"]
     pre_transform_image_size = variant["pre_transform_image_size"]
     image_size = variant["image_size"]
@@ -284,58 +284,11 @@ def experiment(variant):
         pre_transform_image_size = 100
         image_size = 108
 
-    if env_suite == "kitchen":
-        env_kwargs["imwidth"] = pre_transform_image_size
-        env_kwargs["imheight"] = pre_transform_image_size
+    env_kwargs['image_kwargs']['imwidth'] = pre_transform_image_size
+    env_kwargs['image_kwargs']['imheight'] = pre_transform_image_size
 
-        env_pre = make_kitchen_env(env_class, env_kwargs)
-        expl_env = ImageUnFlattenWrapper(env_pre)
-        expl_env.seed(seed)
-        if use_raw_actions:
-            expl_env = ActionRepeat(expl_env, 2)
-            expl_env = NormalizeActions(expl_env)
-            expl_env = TimeLimit(expl_env, 500)
-
-        eval_env_pre = make_kitchen_env(env_class, env_kwargs)
-        eval_env = ImageUnFlattenWrapper(eval_env_pre)
-        eval_env.seed(seed)
-        if use_raw_actions:
-            eval_env = ActionRepeat(eval_env, 2)
-            eval_env = NormalizeActions(eval_env)
-            eval_env = TimeLimit(eval_env, 500)
-    else:
-        use_image_obs = env_kwargs['use_image_obs']
-        reward_scale = env_kwargs['reward_scale']
-        use_dm_backend = env_kwargs['use_dm_backend']
-        env_pre = make_metaworld_env(env_class, env_kwargs, use_dm_backend)
-        eval_env_pre = make_metaworld_env(env_class, env_kwargs, use_dm_backend)
-        if use_image_obs:
-            env_pre = ImageUnFlattenWrapper(
-                ImageEnvMetaworld(
-                    env_pre,
-                    imwidth=pre_transform_image_size,
-                    imheight=pre_transform_image_size,
-                    reward_scale=reward_scale,
-                )
-            )
-
-            eval_env_pre = ImageUnFlattenWrapper(
-                ImageEnvMetaworld(
-                    eval_env_pre,
-                    imwidth=pre_transform_image_size,
-                    imheight=pre_transform_image_size,
-                    reward_scale=reward_scale,
-                )
-            )
-        expl_env = TimeLimit(
-            env_pre,
-            env_kwargs["max_path_length"],
-        )
-
-        eval_env = TimeLimit(
-            eval_env_pre,
-            env_kwargs["max_path_length"],
-        )
+    expl_env = primitives_make_env.make_env(env_suite, env_name, env_kwargs)
+    eval_env = primitives_make_env.make_env(env_suite, env_name, env_kwargs)
     # stack several consecutive frames together
     if encoder_type == "pixel":
         env = utils.FrameStack(expl_env, k=frame_stack)
@@ -343,7 +296,7 @@ def experiment(variant):
     # make directory
     ts = time.gmtime()
     ts = time.strftime("%m-%d", ts)
-    env_name = env_class
+    env_name = env_name
     exp_name = (
         env_name
         + "-"
@@ -371,13 +324,12 @@ def experiment(variant):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    num_primitives = env_pre.num_primitives
-    max_arg_len = env_pre.max_arg_len
-
     if use_raw_actions:
         continuous_action_dim = env.action_space.low.size
         discrete_action_dim = 0
     else:
+        num_primitives = expl_env.num_primitives
+        max_arg_len = expl_env.max_arg_len
         if discrete_continuous_dist:
             continuous_action_dim = max_arg_len
             discrete_action_dim = num_primitives
@@ -420,6 +372,7 @@ def experiment(variant):
     episode, episode_reward, done = 0, 0, True
     start_time = time.time()
     epoch_start_time = time.time()
+    train_expl_st = time.time()
     total_train_expl_time = 0
     all_infos = []
     ep_infos = []
@@ -441,7 +394,7 @@ def experiment(variant):
                 data_augs,
                 image_size,
                 pre_transform_image_size,
-                env_class,
+                env_name,
                 action_repeat,
                 work_dir,
                 seed,
@@ -458,18 +411,18 @@ def experiment(variant):
                     L.dump(step)
             if step % log_interval == 0:
                 L.log("train/episode_reward", episode_reward, step)
-            all_infos.append(ep_infos)
-            ep_infos = []
             obs = expl_env.reset()
             done = False
             episode_reward = 0
             episode_step = 0
             episode += 1
             if step % log_interval == 0:
-                L.log("train/episode", episode, step)
-                # statistics = compute_path_info(all_infos)
+                all_infos.append(ep_infos)
 
-                # rlkit_logger.record_dict(statistics, prefix="exploration/")
+                L.log("train/episode", episode, step)
+                statistics = compute_path_info(all_infos)
+
+                rlkit_logger.record_dict(statistics, prefix="exploration/")
                 rlkit_logger.record_tabular(
                     "time/epoch (s)", time.time() - epoch_start_time
                 )
@@ -481,6 +434,8 @@ def experiment(variant):
                 rlkit_logger.dump_tabular(with_prefix=False, with_timestamp=False)
                 all_infos = []
                 epoch_start_time = time.time()
+            ep_infos = []
+
 
         # sample action for data collection
         if step < init_steps:
