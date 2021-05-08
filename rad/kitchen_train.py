@@ -284,8 +284,12 @@ def experiment(variant):
         pre_transform_image_size = 100
         image_size = 108
 
-    env_kwargs['image_kwargs']['imwidth'] = pre_transform_image_size
-    env_kwargs['image_kwargs']['imheight'] = pre_transform_image_size
+    if env_suite == 'kitchen':
+        env_kwargs['imwidth'] = pre_transform_image_size
+        env_kwargs['imheight'] = pre_transform_image_size
+    else:
+        env_kwargs['image_kwargs']['imwidth'] = pre_transform_image_size
+        env_kwargs['image_kwargs']['imheight'] = pre_transform_image_size
 
     expl_env = primitives_make_env.make_env(env_suite, env_name, env_kwargs)
     eval_env = primitives_make_env.make_env(env_suite, env_name, env_kwargs)
