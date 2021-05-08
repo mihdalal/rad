@@ -291,7 +291,8 @@ def experiment(variant):
     eval_env = primitives_make_env.make_env(env_suite, env_name, env_kwargs)
     # stack several consecutive frames together
     if encoder_type == "pixel":
-        env = utils.FrameStack(expl_env, k=frame_stack)
+        expl_env = utils.FrameStack(expl_env, k=frame_stack)
+        eval_env = utils.FrameStack(eval_env, k=frame_stack)
 
     # make directory
     ts = time.gmtime()
