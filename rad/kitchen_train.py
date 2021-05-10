@@ -330,7 +330,7 @@ def experiment(variant):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     if use_raw_actions:
-        continuous_action_dim = env.action_space.low.size
+        continuous_action_dim = expl_env.action_space.low.size
         discrete_action_dim = 0
     else:
         num_primitives = expl_env.num_primitives
