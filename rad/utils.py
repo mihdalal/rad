@@ -94,18 +94,23 @@ class ReplayBuffer(Dataset):
         self.actions = np.empty((capacity, action_size), dtype=np.float32)
         self.rewards = np.empty((capacity, 1), dtype=np.float32)
         self.not_dones = np.empty((capacity, 1), dtype=np.float32)
+        self.indices = np.empty((capacity, 1), dtype=np.int32)
+        self.next_indices = np.empty((capacity, 1), dtype=np.int32)
 
         self.idx = 0
         self.last_save = 0
         self.full = False
 
-    def add(self, obs, action, reward, next_obs, done):
+    def add(self, obs, action, reward, next_obs, done, index, next_index):
 
         np.copyto(self.obses[self.idx], obs)
         np.copyto(self.actions[self.idx], action)
         np.copyto(self.rewards[self.idx], reward)
         np.copyto(self.next_obses[self.idx], next_obs)
         np.copyto(self.not_dones[self.idx], not done)
+        np.copyto(self.indices[self.idx], index)
+        np.copyto(self.next_indices[self.idx], next_index)
+
 
         self.idx = (self.idx + 1) % self.capacity
         self.full = self.full or self.idx == 0
@@ -185,6 +190,8 @@ class ReplayBuffer(Dataset):
         actions = torch.as_tensor(self.actions[idxs], device=self.device)
         rewards = torch.as_tensor(self.rewards[idxs], device=self.device)
         not_dones = torch.as_tensor(self.not_dones[idxs], device=self.device)
+        indices = torch.as_tensor(self.indices[idxs], device=self.device)
+        next_indices = torch.as_tensor(self.next_indices[idxs], device=self.device)
 
         obses = obses / 255.0
         next_obses = next_obses / 255.0
@@ -198,7 +205,7 @@ class ReplayBuffer(Dataset):
                 obses = func(obses)
                 next_obses = func(next_obses)
 
-        return obses, actions, rewards, next_obses, not_dones
+        return obses, actions, rewards, next_obses, not_dones, indices, next_indices
 
     def save(self, save_dir):
         if self.idx == self.last_save:

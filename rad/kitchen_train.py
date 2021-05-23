@@ -138,6 +138,7 @@ def evaluate(
             done = False
             episode_reward = 0
             ep_infos = []
+            step = 0
             while not done:
                 # center crop image
                 if encoder_type == "pixel" and "crop" in data_augs:
@@ -149,9 +150,10 @@ def evaluate(
                     obs = utils.center_translate(obs, image_size)
                 with utils.eval_mode(agent):
                     if sample_stochastically:
-                        action = agent.sample_action(obs / 255.0)
+                        action = agent.sample_action(obs / 255.0, index=step%agent.actor.multi_step_horizon)
                     else:
-                        action = agent.select_action(obs / 255.0)
+                        action = agent.select_action(obs / 255.0, index=step%agent.actor.multi_step_horizon)
+                step += 1
                 obs, reward, done, info = env.step(action)
                 video.record(env)
                 episode_reward += reward
@@ -214,6 +216,7 @@ def make_agent(
     args,
     agent_kwargs,
     device,
+    multi_step_horizon=1
 ):
     if args.agent == "rad_sac":
         return RadSacAgent(
@@ -239,6 +242,7 @@ def make_agent(
             log_interval=args.log_interval,
             detach_encoder=args.detach_encoder,
             latent_dim=args.latent_dim,
+            multi_step_horizon=multi_step_horizon,
             **agent_kwargs,
         )
     else:
@@ -261,6 +265,7 @@ def experiment(variant):
     env_name = variant["env_name"]
     env_kwargs = variant["env_kwargs"]
     pre_transform_image_size = variant["pre_transform_image_size"]
+    multi_step_horizon = variant.get("multi_step_horizon", 1)
     image_size = variant["image_size"]
     frame_stack = variant["frame_stack"]
     batch_size = variant["batch_size"]
@@ -370,6 +375,7 @@ def experiment(variant):
         args=args,
         device=device,
         agent_kwargs=agent_kwargs,
+        multi_step_horizon=multi_step_horizon,
     )
 
     L = Logger(work_dir, use_tb=args.save_tb)
@@ -417,6 +423,7 @@ def experiment(variant):
             if step % log_interval == 0:
                 L.log("train/episode_reward", episode_reward, step)
             obs = expl_env.reset()
+            policy_step_obs = obs
             done = False
             episode_reward = 0
             episode_step = 0
@@ -447,7 +454,7 @@ def experiment(variant):
             action = expl_env.action_space.sample()
         else:
             with utils.eval_mode(agent):
-                action = agent.sample_action(obs / 255.0)
+                action = agent.sample_action(policy_step_obs / 255.0, index=step % multi_step_horizon)
 
         # run training update
         if step >= init_steps:
@@ -457,13 +464,21 @@ def experiment(variant):
                 num_train_calls += 1
 
         next_obs, reward, done, info = expl_env.step(action)
+
+        if (step+1) % multi_step_horizon != 0:
+            # +1 because you would take the action from the reset state
+            obs = policy_step_obs
+            next_obs = obs
+        else:
+            policy_step_obs = next_obs
+
         ep_infos.append(info)
         # allow infinit bootstrap
         done_bool = (
             0 if episode_step + 1 == expl_env._max_episode_steps else float(done)
         )
         episode_reward += reward
-        replay_buffer.add(obs, action, reward, next_obs, done_bool)
+        replay_buffer.add(obs, action, reward, next_obs, done_bool, step % multi_step_horizon, (step+1)%multi_step_horizon)
 
         obs = next_obs
         episode_step += 1

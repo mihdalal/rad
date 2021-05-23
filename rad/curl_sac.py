@@ -79,6 +79,7 @@ class Actor(nn.Module):
         discrete_continuous_dist=False,
         continuous_action_dim=14,
         discrete_action_dim=12,
+        multi_step_horizon=1,
     ):
         super().__init__()
 
@@ -90,6 +91,7 @@ class Actor(nn.Module):
             num_filters,
             output_logits=True,
         )
+        self.multi_step_horizon = multi_step_horizon
 
         self.log_std_min = log_std_min
         self.log_std_max = log_std_max
@@ -110,13 +112,13 @@ class Actor(nn.Module):
                 nn.ReLU(),
                 nn.Linear(hidden_dim, hidden_dim),
                 nn.ReLU(),
-                nn.Linear(hidden_dim, 2 * continuous_action_dim),
+                nn.Linear(hidden_dim, 2 * continuous_action_dim*multi_step_horizon),
             )
 
         self.outputs = dict()
         self.apply(weight_init)
 
-    def forward(self, obs, compute_pi=True, compute_log_pi=True, detach_encoder=False):
+    def forward(self, obs, compute_pi=True, compute_log_pi=True, detach_encoder=False, indices=None):
         obs = self.encoder(obs, detach=detach_encoder)
         trunk = self.trunk(obs)
         if self.discrete_continuous_dist:
@@ -127,6 +129,30 @@ class Actor(nn.Module):
             dist = OneHotDist(logits=logits)
 
         mu, log_std = trunk.chunk(2, dim=-1)
+        if indices is not None:
+            feat_size = mu.shape[1] // self.multi_step_horizon
+            af = torch.cat(
+                [
+                    mu[:, feat_size * i : feat_size * (i + 1)].unsqueeze(1)
+                    for i in range(self.multi_step_horizon)
+                ],
+                1,
+            )
+            mu = torch.gather(
+                af, 1, indices.long().unsqueeze(-1).repeat(1, 1, feat_size)
+            )[:, 0, :]
+
+            feat_size = log_std.shape[1] // self.multi_step_horizon
+            af = torch.cat(
+                [
+                    log_std[:, feat_size * i : feat_size * (i + 1)].unsqueeze(1)
+                    for i in range(self.multi_step_horizon)
+                ],
+                1,
+            )
+            log_std = torch.gather(
+                af, 1, indices.long().unsqueeze(-1).repeat(1, 1, feat_size)
+            )[:, 0, :]
 
         # constrain log_std inside [log_std_min, log_std_max]
         log_std = torch.tanh(log_std)
@@ -179,7 +205,7 @@ class Actor(nn.Module):
 class QFunction(nn.Module):
     """MLP for q-function."""
 
-    def __init__(self, obs_dim, action_dim, hidden_dim):
+    def __init__(self, obs_dim, action_dim, hidden_dim, multi_step_horizon):
         super().__init__()
 
         self.trunk = nn.Sequential(
@@ -187,7 +213,7 @@ class QFunction(nn.Module):
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, 1),
+            nn.Linear(hidden_dim, multi_step_horizon),
         )
 
     def forward(self, obs, action):
@@ -209,6 +235,7 @@ class Critic(nn.Module):
         encoder_feature_dim,
         num_layers,
         num_filters,
+        multi_step_horizon=1,
     ):
         super().__init__()
 
@@ -221,8 +248,8 @@ class Critic(nn.Module):
             output_logits=True,
         )
 
-        self.Q1 = QFunction(self.encoder.feature_dim, action_size, hidden_dim)
-        self.Q2 = QFunction(self.encoder.feature_dim, action_size, hidden_dim)
+        self.Q1 = QFunction(self.encoder.feature_dim, action_size, hidden_dim, multi_step_horizon)
+        self.Q2 = QFunction(self.encoder.feature_dim, action_size, hidden_dim, multi_step_horizon)
 
         self.outputs = dict()
         self.apply(weight_init)
@@ -345,6 +372,7 @@ class RadSacAgent(object):
         detach_encoder=False,
         latent_dim=128,
         data_augs="",
+        multi_step_horizon=1,
     ):
         torch.backends.cudnn.benchmark = True
         self.device = device
@@ -392,6 +420,7 @@ class RadSacAgent(object):
             discrete_continuous_dist,
             continuous_action_dim,
             discrete_action_dim,
+            multi_step_horizon=multi_step_horizon
         ).to(device)
 
         self.critic = Critic(
@@ -402,6 +431,7 @@ class RadSacAgent(object):
             encoder_feature_dim,
             num_layers,
             num_filters,
+            multi_step_horizon=multi_step_horizon
         ).to(device)
 
         self.critic_target = Critic(
@@ -412,6 +442,7 @@ class RadSacAgent(object):
             encoder_feature_dim,
             num_layers,
             num_filters,
+            multi_step_horizon=multi_step_horizon
         ).to(device)
 
         self.critic_target.load_state_dict(self.critic.state_dict())
@@ -470,14 +501,16 @@ class RadSacAgent(object):
     def alpha(self):
         return self.log_alpha.exp()
 
-    def select_action(self, obs):
+    def select_action(self, obs, index=0):
         with torch.no_grad():
             obs = torch.FloatTensor(obs).to(self.device)
             obs = obs.unsqueeze(0)
             mu, _, _, _ = self.actor(obs, compute_pi=False, compute_log_pi=False)
+            action_dim = mu.shape[1]//self.actor.multi_step_horizon
+            mu = mu[:, index * action_dim : (index + 1) * action_dim]
             return mu.cpu().data.numpy().flatten()
 
-    def sample_action(self, obs):
+    def sample_action(self, obs, index=0):
         if obs.shape[-1] != self.image_size:
             obs = utils.center_crop_image(obs, self.image_size)
 
@@ -485,12 +518,16 @@ class RadSacAgent(object):
             obs = torch.FloatTensor(obs).to(self.device)
             obs = obs.unsqueeze(0)
             mu, pi, _, _ = self.actor(obs, compute_log_pi=False)
+            action_dim = pi.shape[1]//self.actor.multi_step_horizon
+            pi = pi[:, index * action_dim : (index + 1) * action_dim]
             return pi.cpu().data.numpy().flatten()
 
-    def update_critic(self, obs, action, reward, next_obs, not_done, L, step):
+    def update_critic(self, obs, action, reward, next_obs, not_done, L, step, indices=None, next_indices=None):
         with torch.no_grad():
-            _, policy_action, log_pi, _ = self.actor(next_obs)
+            _, policy_action, log_pi, _ = self.actor(next_obs, indices=next_indices)
             target_Q1, target_Q2 = self.critic_target(next_obs, policy_action)
+            target_Q1 = torch.gather(target_Q1, 1, next_indices.long())
+            target_Q2 = torch.gather(target_Q2, 1, next_indices.long())
             target_V = torch.min(target_Q1, target_Q2) - self.alpha.detach() * log_pi
             target_Q = reward + (not_done * self.discount * target_V)
 
@@ -498,6 +535,8 @@ class RadSacAgent(object):
         current_Q1, current_Q2 = self.critic(
             obs, action, detach_encoder=self.detach_encoder
         )
+        current_Q1 = torch.gather(current_Q1, 1, indices.long())
+        current_Q2 = torch.gather(current_Q2, 1, indices.long())
         critic_loss = F.mse_loss(current_Q1, target_Q) + F.mse_loss(
             current_Q2, target_Q
         )
@@ -511,11 +550,13 @@ class RadSacAgent(object):
 
         self.critic.log(L, step)
 
-    def update_actor_and_alpha(self, obs, L, step):
+    def update_actor_and_alpha(self, obs, L, step, indices):
         # detach encoder, so we don't update it with the actor loss
-        _, pi, log_pi, log_std = self.actor(obs, detach_encoder=True)
+        _, pi, log_pi, log_std = self.actor(obs, detach_encoder=True, indices=indices)
         actor_Q1, actor_Q2 = self.critic(obs, pi, detach_encoder=True)
 
+        actor_Q1 = torch.gather(actor_Q1, 1, indices.long())
+        actor_Q2 = torch.gather(actor_Q2, 1, indices.long())
         actor_Q = torch.min(actor_Q1, actor_Q2)
         actor_loss = (self.alpha.detach() * log_pi - actor_Q).mean()
 
@@ -570,7 +611,7 @@ class RadSacAgent(object):
 
     def update(self, replay_buffer, L, step):
         if self.encoder_type == "pixel":
-            obs, action, reward, next_obs, not_done = replay_buffer.sample_rad(
+            obs, action, reward, next_obs, not_done, indices, next_indices = replay_buffer.sample_rad(
                 self.augs_funcs
             )
         else:
@@ -579,10 +620,10 @@ class RadSacAgent(object):
         if step % self.log_interval == 0:
             L.log("train/batch_reward", reward.mean(), step)
 
-        self.update_critic(obs, action, reward, next_obs, not_done, L, step)
+        self.update_critic(obs, action, reward, next_obs, not_done, L, step, indices, next_indices)
 
         if step % self.actor_update_freq == 0:
-            self.update_actor_and_alpha(obs, L, step)
+            self.update_actor_and_alpha(obs, L, step, indices)
 
         if step % self.critic_target_update_freq == 0:
             utils.soft_update_params(
